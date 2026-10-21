@@ -165,6 +165,7 @@ pub(crate) async fn gateway_turn(
     let mut complete = false;
     let mut accepted = false;
     let mut message_started = false;
+    let mut emitted_text = String::new();
     let mut error = None;
     loop {
         tokio::select! {
@@ -174,13 +175,25 @@ pub(crate) async fn gateway_turn(
                 let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
                 let kind=event["kind"].as_str().unwrap_or_default();
                 match kind {
-                    "text" => {
+                    "text" | "snapshot" => {
                         let text=event["text"].as_str().unwrap_or("");
                         if !message_started {
                             sink(AgentEvent{session_id:session_id.clone(),kind:"message_start".into(),text:String::new(),request_id:None,data:Some(serde_json::json!({"messageId":session_id})),tool:None});
                             message_started=true;
                         }
-                        if !text.is_empty() { sink(AgentEvent{session_id:session_id.clone(),kind:"text".into(),text:text.into(),request_id:None,data:None,tool:None}); }
+                        let delta = if kind == "snapshot" {
+                            if !text.starts_with(&emitted_text) {
+                                error = Some("Gateway text baseline changed; reconnect recovery is required".into());
+                                break;
+                            }
+                            let suffix = &text[emitted_text.len()..];
+                            emitted_text = text.to_owned();
+                            suffix.to_owned()
+                        } else {
+                            emitted_text.push_str(text);
+                            text.to_owned()
+                        };
+                        if !delta.is_empty() { sink(AgentEvent{session_id:session_id.clone(),kind:"text".into(),text:delta,request_id:None,data:None,tool:None}); }
                     }
                     "status" => sink(AgentEvent{session_id:session_id.clone(),kind:"status".into(),text:event["text"].as_str().unwrap_or("").into(),request_id:None,data:None,tool:None}),
                     "accepted" => {
