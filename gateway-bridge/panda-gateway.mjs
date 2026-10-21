@@ -43,7 +43,7 @@ const client = new GatewayClient({
   },
   onEvent: event => {
     const p=event.payload||{};
-    if (event.event==='chat' && p.sessionKey===sessionKey) {
+    if (event.event==='chat' && p.sessionKey===sessionKey && !settled) {
       if (activeRun && p.runId && p.runId!==activeRun) return;
       const merged = mergeChatStreamMessage(lastMessage, p);
       if (merged !== undefined) {
@@ -88,9 +88,12 @@ try {
       break;
     }
   } })();
-  await Promise.race([completion, new Promise((_,reject)=>setTimeout(()=>reject(new Error('Gateway turn timed out')),900000))]);
+  let watchdog;
+  try {
+    await Promise.race([completion, new Promise((_,reject)=>{watchdog=setTimeout(()=>reject(new Error('Gateway turn timed out')),900000);})]);
+  } finally { clearTimeout(watchdog); }
   void controls;
 } catch(error) {
   line({kind:'error',text:error instanceof Error?error.message:String(error)});
   process.exitCode=1;
-} finally {client.stop();input.close();}
+} finally { await client.stopAndWait(); input.close(); }
