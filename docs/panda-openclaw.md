@@ -37,3 +37,8 @@ OpenClaw does not require Docker in order to execute tools on the host. Set its 
 6. Build and test Windows x64, exercise local PowerShell/filesystem tools and model credentials, and verify project session isolation.
 
 **Status:** code committed for review; not compiled or end-to-end validated. Do not merge into main or represent as production ready.
+
+
+## October 21 integration verification notes
+
+Panda is now registered as a normal provider and the OpenClaw command resolves through PandaCode's existing cross-platform launcher, including Windows npm shims. The CLI bridge returns completed responses, not live Gateway streaming. Its permission selection is deliberately labeled OpenClaw-managed; the app does not claim to enforce approvals it has not connected. The Windows build has not yet been verified, and no GitHub commit status checks have been reported for these changes.
