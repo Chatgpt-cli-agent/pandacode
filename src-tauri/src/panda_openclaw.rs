@@ -196,6 +196,13 @@ pub(crate) async fn gateway_turn(
                         if !delta.is_empty() { sink(AgentEvent{session_id:session_id.clone(),kind:"text".into(),text:delta,request_id:None,data:None,tool:None}); }
                     }
                     "status" => sink(AgentEvent{session_id:session_id.clone(),kind:"status".into(),text:event["text"].as_str().unwrap_or("").into(),request_id:None,data:None,tool:None}),
+                    "tool" => {
+                        let name=event["data"]["tool"].as_str().unwrap_or("OpenClaw tool");
+                        let phase=event["data"]["phase"].as_str().unwrap_or("working");
+                        sink(AgentEvent { session_id:session_id.clone(), kind:"status".into(),
+                            text:format!("{name}: {phase}"), request_id:None,
+                            data:Some(event["data"].clone()), tool:None });
+                    },
                     "accepted" => {
                         accepted=true;
                         if !message_started {
