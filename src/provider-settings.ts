@@ -1,4 +1,5 @@
 import './provider-settings.css';
+import { mountPandaOpenClaw } from './panda-openclaw-panel';
 import { call, preview } from './bridge';
 import { escape, icon } from './dom';
 import { providerLogo } from './provider-logos';
@@ -196,9 +197,10 @@ export function mountProviderSettings(host: HTMLElement, saved: () => Promise<un
     void perform(() => call('provider_set_mimo_endpoint', { endpoint: chosen }), 'MiMo endpoint saved.').finally(() => { endpointEdited = false; });
   };
   host.addEventListener('submit', submit); host.addEventListener('click', click); host.addEventListener('input', input); host.addEventListener('change', change);
+  const unmountPanda = mountPandaOpenClaw(host);
   void call<Configuration>('provider_configuration').then(config => { if (!disposed && configurationRevision === 0) render(config); }).catch(error => { if (!disposed && configurationRevision === 0) message(String(error), true); });
   void checkClaude();
-  return () => { disposed = true; for (const input of keyInputs) input.value = ''; editedPaths.clear(); host.removeEventListener('submit', submit); host.removeEventListener('click', click); host.removeEventListener('input', input); host.removeEventListener('change', change); };
+  return () => { unmountPanda(); disposed = true; for (const input of keyInputs) input.value = ''; editedPaths.clear(); host.removeEventListener('submit', submit); host.removeEventListener('click', click); host.removeEventListener('input', input); host.removeEventListener('change', change); };
 }
 
 function pathForm(provider: string, label: string, placeholder: string): string {

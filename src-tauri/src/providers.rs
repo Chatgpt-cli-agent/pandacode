@@ -429,7 +429,7 @@ pub struct ReasoningEffortInfo {
 
 pub fn validate_reasoning_effort(provider: &str, effort: Option<&str>) -> Result<(), String> {
     let valid = match (provider, effort) {
-        ("claude" | "codex" | "kimi" | "glm" | "opencode" | "antigravity" | "grok" | "mimo" | "pi", None) => true,
+        ("claude" | "codex" | "kimi" | "glm" | "opencode" | "antigravity" | "grok" | "mimo" | "pi" | "panda", None) => true,
         ("claude" | "glm" | "mimo", Some(value)) => {
             ["low", "medium", "high", "xhigh", "max"].contains(&value)
         }
@@ -494,6 +494,10 @@ pub(crate) fn executable(name: &str) -> Option<PathBuf> {
 
 /// Any command-line tool (`gh`, `git`…) where an interactive shell would find it, even
 /// when PandaCode was opened from Finder or the Dock with a minimal PATH.
+pub(crate) fn command(path: &std::path::Path) -> Result<Command, String> {
+    launch::command(path)
+}
+
 pub(crate) fn tool_path(name: &str) -> Option<std::path::PathBuf> {
     launch::find(name)
 }
@@ -573,15 +577,18 @@ pub fn discover() -> Vec<ProviderInfo> {
         ("grok", "Grok Build"),
         ("mimo", "MiMo Token Plan"),
         ("pi", "Pi"),
+        ("panda", "Panda (OpenClaw)"),
     ]
     .into_iter()
     .map(|(id, name)| {
-        let path = executable(id);
+        let path = if id == "panda" { launch::find("openclaw") } else { executable(id) };
         ProviderInfo {
             id: id.into(),
             name: name.into(),
-            installed: path.is_some(),
-            version: if id == "antigravity" {
+            installed: if id == "panda" { crate::panda_openclaw::available() } else { path.is_some() },
+            version: if id == "panda" {
+                "OpenClaw".into()
+            } else if id == "antigravity" {
                 "ACP".into()
             } else {
                 path.as_deref().and_then(version).unwrap_or_default()
@@ -607,6 +614,7 @@ pub fn discover() -> Vec<ProviderInfo> {
 /// On-demand metadata only: no user prompt or inference. ACP-only servers may
 /// create an empty session to advertise their scoped model options.
 pub async fn list_models(provider: &str) -> Result<Vec<ModelInfo>, String> {
+    if provider == "panda" { return Ok(vec![ModelInfo::default_choice()]); }
     if provider == "opencode" {
         let selected = crate::provider_settings::opencode_model_ids()?;
         if selected.is_empty() {
@@ -2584,6 +2592,60 @@ pub async fn run_with_tools(
     input: UnboundedReceiver<RunInput>,
     host: Option<ToolHost>,
 ) -> Result<(), String> {
+    if config.provider == "panda" {
+        sink(AgentEvent { session_id: config.session_id.clone(), kind: "status".into(), text: "Starting Panda (OpenClaw)".into(), request_id: None, data: None, tool: None });
+        let selected_model = if config.model.is_empty() || config.model == "default" { None } else { Some(config.model.clone()) };
+        let request = crate::panda_openclaw::PandaRequest {
+            project_dir: config.cwd.to_string_lossy().into_owned(),
+            prompt: config.prompt.clone(),
+            model: selected_model,
+            session_key: Some(config.session_id.clone()),
+            direct: false,
+        };
+        let session_id = config.session_id.clone();
+        if std::env::var("PANDA_USE_GATEWAY").as_deref() == Ok("1") {
+            let outcome = crate::panda_openclaw::gateway_turn(
+                session_id.clone(), config.cwd.clone(), config.prompt.clone(), sink.clone(), input
+            ).await;
+            match &outcome {
+                Ok(()) => sink(AgentEvent { session_id, kind: "done".into(), text: "Finished".into(), request_id: None, data: None, tool: None }),
+                Err(error) => {
+                    sink(AgentEvent { session_id: session_id.clone(), kind: "error".into(), text: error.clone(), request_id: None, data: None, tool: None });
+                    sink(AgentEvent { session_id, kind: "done".into(), text: "Failed".into(), request_id: None, data: None, tool: None });
+                }
+            }
+            return outcome;
+        }
+        let task = crate::panda_openclaw::panda_openclaw_turn(request);
+        tokio::pin!(task);
+        let mut input = input;
+        let outcome = loop {
+            tokio::select! {
+                result = &mut task => break result,
+                incoming = input.recv() => match incoming {
+                    Some(RunInput::Stop) | None => break Err("Panda turn cancelled".into()),
+                    Some(RunInput::Steer { reply, .. }) => { let _ = reply.send(Err("Panda steering is not supported through the CLI bridge yet".into())); },
+                    Some(RunInput::Approval { .. }) => {},
+                    Some(RunInput::Goal { reply, .. }) => { let _ = reply.send(Err("Panda goal operations require the Gateway adapter".into())); },
+                    Some(RunInput::CodexRequest { reply, .. }) => { let _ = reply.send(Err("Not a Codex session".into())); },
+                    Some(RunInput::UserInput { reply, .. }) => { if let Some(reply) = reply { let _ = reply.send(Err("Not supported by the CLI bridge".into())); } },
+                }
+            }
+        };
+        match outcome {
+            Ok(reply) => {
+                sink(AgentEvent { session_id: session_id.clone(), kind: "message_start".into(), text: String::new(), request_id: None, data: Some(json!({"messageId": format!("panda-{}",uuid::Uuid::new_v4())})), tool: None });
+                sink(AgentEvent { session_id: session_id.clone(), kind: "text".into(), text: reply.text, request_id: None, data: None, tool: None });
+                sink(AgentEvent { session_id, kind: "done".into(), text: "Finished".into(), request_id: None, data: None, tool: None });
+                return Ok(());
+            }
+            Err(error) => {
+                sink(AgentEvent { session_id: session_id.clone(), kind: "error".into(), text: error.clone(), request_id: None, data: None, tool: None });
+                sink(AgentEvent { session_id, kind: "done".into(), text: "Failed".into(), request_id: None, data: None, tool: None });
+                return Err(error);
+            }
+        }
+    }
     let identity = Protocol::new(config.clone());
     sink(identity.event("status", "Starting agent", None));
     let result = run_inner(config, sink.clone(), input, host).await;
@@ -2669,7 +2731,7 @@ async fn run_inner(
     input: UnboundedReceiver<RunInput>,
     host: Option<ToolHost>,
 ) -> Result<(), String> {
-    if !["claude", "codex", "kimi", "opencode", "glm", "antigravity", "grok", "mimo", "pi"]
+    if !["claude", "codex", "kimi", "opencode", "glm", "antigravity", "grok", "mimo", "pi", "panda"]
         .contains(&config.provider.as_str())
     {
         return Err("Unknown provider".into());

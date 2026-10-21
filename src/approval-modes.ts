@@ -4,6 +4,16 @@ export interface ApprovalMode { id: Mode; label: string; description: string; ic
 
 /** Labels describe the native policy for each harness, not a simulated approval layer. */
 export function approvalModes(provider: ProviderId): ApprovalMode[] {
+  if (provider === 'panda') {
+    // OpenClaw owns its policy. Until the Gateway adapter synchronizes modes,
+    // do not imply PandaCode is enforcing restrictions it cannot enforce.
+    return [
+      { id: 'ask', label: 'OpenClaw policy', icon: 'check', description: 'Execution and approvals follow Panda’s OpenClaw configuration, not PandaCode’s permission controls.' },
+      { id: 'auto', label: 'OpenClaw policy', icon: 'check', description: 'Execution and approvals follow Panda’s OpenClaw configuration. This selection does not override them.' },
+      { id: 'plan', label: 'OpenClaw policy', icon: 'plan', description: 'Not a read-only guarantee. Configure read-only behavior in OpenClaw.' },
+      { id: 'full', label: 'OpenClaw policy', icon: 'unlock', description: 'Host access depends on OpenClaw configuration and Windows account permissions.' },
+    ];
+  }
   const standard: ApprovalMode = { id: 'ask', label: 'Standard', icon: 'check', description: provider === 'codex'
     ? 'Work in this project. Ask you when an action needs extra permission.'
     : provider === 'grok'
