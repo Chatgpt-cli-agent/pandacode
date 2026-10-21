@@ -94,7 +94,7 @@ pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> 
     let result=tokio::time::timeout(Duration::from_secs(900), child.wait_with_output())
         .await.map_err(|_|"OpenClaw turn exceeded 15 minutes")?
         .map_err(|e|format!("OpenClaw process failed: {e}"))?;
-    if result.stdout.len()>MAX_JSON {return Err("OpenClaw output exceeded limit".into())}
+    if result.stdout.len()>MAX_JSON || result.stderr.len()>MAX_JSON {return Err("OpenClaw output exceeded limit".into())}
     let output:String=String::from_utf8(result.stdout).map_err(|_|"OpenClaw output was not UTF-8")?;
     if !result.status.success(){
         let error=String::from_utf8_lossy(&result.stderr);
@@ -109,6 +109,9 @@ pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> 
       .or_else(||raw["final"].as_str().map(str::to_owned))
       .or_else(||raw["result"]["final"].as_str().map(str::to_owned))
       .unwrap_or_default();
+    if text.trim().is_empty() && !raw["ok"].as_bool().unwrap_or(true) {
+        return Err("OpenClaw reported an unsuccessful turn without a final reply".into());
+    }
     Ok(PandaReply{text,raw,profile:PROFILE})
 }
 #[cfg(test)]
