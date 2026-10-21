@@ -2599,6 +2599,19 @@ pub async fn run_with_tools(
             direct: false,
         };
         let session_id = config.session_id.clone();
+        if std::env::var("PANDA_USE_GATEWAY").as_deref() == Ok("1") {
+            let outcome = crate::panda_openclaw::gateway_turn(
+                session_id.clone(), config.cwd.clone(), config.prompt.clone(), sink.clone(), input
+            ).await;
+            match &outcome {
+                Ok(()) => sink(AgentEvent { session_id, kind: "done".into(), text: "Finished".into(), request_id: None, data: None, tool: None }),
+                Err(error) => {
+                    sink(AgentEvent { session_id: session_id.clone(), kind: "error".into(), text: error.clone(), request_id: None, data: None, tool: None });
+                    sink(AgentEvent { session_id, kind: "done".into(), text: "Failed".into(), request_id: None, data: None, tool: None });
+                }
+            }
+            return outcome;
+        }
         let task = crate::panda_openclaw::panda_openclaw_turn(request);
         tokio::pin!(task);
         let mut input = input;
