@@ -118,4 +118,18 @@ pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> 
 mod tests {
     use super::*;
     #[test] fn check_id(){assert!(validate_id("agent:panda:project-1").is_ok()); assert!(validate_id("../escape").is_err()); assert!(validate_model("openai/gpt-5").is_ok()); assert!(validate_model("../bad").is_err());}
+    #[test]
+    fn reject_invalid_model_and_session_ids() {
+        for bad in ["", "../oops", "x y", "slash/name", "a".repeat(161).as_str()] {
+            assert!(validate_id(bad).is_err(), "unexpected session identifier {bad}");
+        }
+        for valid in ["ollama/qwen3.5:9b", "anthropic/claude-sonnet-4-6", "openai/gpt-6"] {
+            assert!(validate_model(valid).is_ok(), "valid provider model {valid}");
+        }
+    }
+    #[test]
+    fn reject_invalid_project_paths() {
+        assert!(root("/this/pandacode/folder/does/not/exist").is_err());
+    }
+
 }
