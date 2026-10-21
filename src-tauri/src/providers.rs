@@ -494,6 +494,10 @@ pub(crate) fn executable(name: &str) -> Option<PathBuf> {
 
 /// Any command-line tool (`gh`, `git`…) where an interactive shell would find it, even
 /// when PandaCode was opened from Finder or the Dock with a minimal PATH.
+pub(crate) fn command(path: &std::path::Path) -> Result<Command, String> {
+    launch::command(path)
+}
+
 pub(crate) fn tool_path(name: &str) -> Option<std::path::PathBuf> {
     launch::find(name)
 }
