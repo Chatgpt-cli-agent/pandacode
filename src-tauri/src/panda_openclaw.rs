@@ -164,6 +164,7 @@ pub(crate) async fn gateway_turn(
     let mut reader = BufReader::new(stdout).lines();
     let mut complete = false;
     let mut accepted = false;
+    let mut message_started = false;
     let mut error = None;
     loop {
         tokio::select! {
@@ -175,12 +176,19 @@ pub(crate) async fn gateway_turn(
                 match kind {
                     "text" => {
                         let text=event["text"].as_str().unwrap_or("");
+                        if !message_started {
+                            sink(AgentEvent{session_id:session_id.clone(),kind:"message_start".into(),text:String::new(),request_id:None,data:Some(serde_json::json!({"messageId":session_id})),tool:None});
+                            message_started=true;
+                        }
                         if !text.is_empty() { sink(AgentEvent{session_id:session_id.clone(),kind:"text".into(),text:text.into(),request_id:None,data:None,tool:None}); }
                     }
                     "status" => sink(AgentEvent{session_id:session_id.clone(),kind:"status".into(),text:event["text"].as_str().unwrap_or("").into(),request_id:None,data:None,tool:None}),
                     "accepted" => {
                         accepted=true;
-                        sink(AgentEvent{session_id:session_id.clone(),kind:"message_start".into(),text:String::new(),request_id:None,data:Some(serde_json::json!({"messageId":event["runId"]})),tool:None});
+                        if !message_started {
+                            sink(AgentEvent{session_id:session_id.clone(),kind:"message_start".into(),text:String::new(),request_id:None,data:Some(serde_json::json!({"messageId":event["runId"]})),tool:None});
+                            message_started=true;
+                        }
                     },
                     "complete" => {complete=true;break;},
                     "aborted" => return Err("Panda Gateway turn cancelled".into()),
