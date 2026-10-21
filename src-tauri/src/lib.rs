@@ -19,6 +19,7 @@ mod project_icon;
 mod simulator;
 mod vm;
 mod secret_store;
+mod native_harness;
 mod cloud;
 mod vsix_themes;
 mod token_saver;
@@ -2922,6 +2923,10 @@ pub fn run() {
             }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
                 support::open_support,
+                native_harness::native_store_key,
+                native_harness::native_delete_key,
+                native_harness::native_list_skills,
+                native_harness::native_run_turn,
                 support::support_details,
                 agent_updates::check_agent_updates,
                 agent_updates::update_agent,
