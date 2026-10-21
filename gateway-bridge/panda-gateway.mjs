@@ -24,6 +24,8 @@ let started = false;
 let activeRun = null;
 let lastText = '';
 let settled = false;
+let settle;
+const completion = new Promise(resolve => { settle = resolve; });
 let readyResolve, readyReject;
 const ready = new Promise((resolve,reject)=>{readyResolve=resolve;readyReject=reject;});
 const client = new GatewayClient({
@@ -50,6 +52,7 @@ const client = new GatewayClient({
       }
       if (p.state==='final'||p.state==='done'||p.state==='error'||p.state==='aborted') {
         settled=true;
+        settle();
         line({kind:p.state==='error'?'error':'complete',text:lastText, state:p.state});
       }
     }
@@ -66,14 +69,17 @@ try {
   const receipt=await client.request('chat.send',{sessionKey,message:spec.prompt,idempotencyKey:key});
   activeRun=receipt?.runId || null;
   line({kind:'accepted',runId:activeRun});
-  for await (const message of input) {
+  const controls = (async () => { for await (const message of input) {
     let command; try{command=JSON.parse(message);}catch{continue;}
     if (command.kind==='abort') {
       await client.request('chat.abort',{sessionKey,runId:activeRun}).catch(err=>line({kind:'error',text:String(err)}));
       line({kind:'aborted'});
+      settle();
       break;
     }
-  }
+  } })();
+  await Promise.race([completion, new Promise((_,reject)=>setTimeout(()=>reject(new Error('Gateway turn timed out')),900000))]);
+  void controls;
 } catch(error) {
   line({kind:'error',text:error instanceof Error?error.message:String(error)});
   process.exitCode=1;
