@@ -2584,6 +2584,47 @@ pub async fn run_with_tools(
     input: UnboundedReceiver<RunInput>,
     host: Option<ToolHost>,
 ) -> Result<(), String> {
+    if config.provider == "panda" {
+        sink(AgentEvent { session_id: config.session_id.clone(), kind: "status".into(), text: "Starting Panda (OpenClaw)".into(), request_id: None, data: None, tool: None });
+        let selected_model = if config.model.is_empty() || config.model == "default" { None } else { Some(config.model.clone()) };
+        let request = crate::panda_openclaw::PandaRequest {
+            project_dir: config.cwd.to_string_lossy().into_owned(),
+            prompt: config.prompt.clone(),
+            model: selected_model,
+            session_key: Some(config.session_id.clone()),
+            direct: false,
+        };
+        let session_id = config.session_id.clone();
+        let task = crate::panda_openclaw::panda_openclaw_turn(request);
+        tokio::pin!(task);
+        let mut input = input;
+        let outcome = loop {
+            tokio::select! {
+                result = &mut task => break result,
+                incoming = input.recv() => match incoming {
+                    Some(RunInput::Stop) | None => break Err("Panda turn cancelled".into()),
+                    Some(RunInput::Steer { reply, .. }) => { let _ = reply.send(Err("Panda steering is not supported through the CLI bridge yet".into())); },
+                    Some(RunInput::Approval { .. }) => {},
+                    Some(RunInput::Goal { reply, .. }) => { let _ = reply.send(Err("Panda goal operations require the Gateway adapter".into())); },
+                    Some(RunInput::CodexRequest { reply, .. }) => { let _ = reply.send(Err("Not a Codex session".into())); },
+                    Some(RunInput::UserInput { reply, .. }) => { if let Some(reply) = reply { let _ = reply.send(Err("Not supported by the CLI bridge".into())); } },
+                }
+            }
+        };
+        match outcome {
+            Ok(reply) => {
+                sink(AgentEvent { session_id: session_id.clone(), kind: "message_start".into(), text: String::new(), request_id: None, data: Some(json!({"messageId": format!("panda-{}",uuid::Uuid::new_v4())})), tool: None });
+                sink(AgentEvent { session_id: session_id.clone(), kind: "text".into(), text: reply.text, request_id: None, data: None, tool: None });
+                sink(AgentEvent { session_id, kind: "done".into(), text: "Finished".into(), request_id: None, data: None, tool: None });
+                return Ok(());
+            }
+            Err(error) => {
+                sink(AgentEvent { session_id: session_id.clone(), kind: "error".into(), text: error.clone(), request_id: None, data: None, tool: None });
+                sink(AgentEvent { session_id, kind: "done".into(), text: "Failed".into(), request_id: None, data: None, tool: None });
+                return Err(error);
+            }
+        }
+    }
     let identity = Protocol::new(config.clone());
     sink(identity.event("status", "Starting agent", None));
     let result = run_inner(config, sink.clone(), input, host).await;
