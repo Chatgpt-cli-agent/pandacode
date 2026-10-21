@@ -3,9 +3,8 @@
 // Stdout is JSON-lines events for the Rust host; credentials never travel to the renderer.
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { GatewayClient } from '@openclaw/gateway-client';
+import { GatewayClient, mergeChatStreamMessage } from '@openclaw/gateway-client';
 import { PROTOCOL_VERSION } from '@openclaw/gateway-protocol/version';
-import { GATEWAY_CLIENT_CAPS } from '@openclaw/gateway-protocol/client-info';
 
 const line = (message) => process.stdout.write(JSON.stringify(message) + '\n');
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -24,6 +23,7 @@ if (!/^wss:\/\//.test(url) && !/^ws:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)
 let started = false;
 let activeRun = null;
 let lastText = '';
+let lastMessage;
 let settled = false;
 let settle;
 const completion = new Promise(resolve => { settle = resolve; });
@@ -36,7 +36,6 @@ const client = new GatewayClient({
   maxProtocol: PROTOCOL_VERSION,
   role: 'operator',
   scopes: ['operator.read','operator.write'],
-  caps: [GATEWAY_CLIENT_CAPS.TOOL_EVENTS],
   onHelloOk: ()=>{line({kind:'status',text:'Gateway connected'});readyResolve();},
   onConnectError: error => {
     if (!started) readyReject(error);
@@ -46,20 +45,25 @@ const client = new GatewayClient({
     const p=event.payload||{};
     if (event.event==='chat' && p.sessionKey===sessionKey) {
       if (activeRun && p.runId && p.runId!==activeRun) return;
-      const blocks=Array.isArray(p.message?.content)?p.message.content:[];
-      const next = blocks.map(block=>block?.type==='text'?block.text||'':'').join('') ||
-        (typeof p.message?.content === 'string' ? p.message.content :
-        typeof p.message?.text === 'string' ? p.message.text :
-        typeof p.text === 'string' ? p.text : '');
-      if (next) {
-        const suffix=next.startsWith(lastText)?next.slice(lastText.length):next;
-        if (suffix) line({kind:'text',text:suffix,replace:!next.startsWith(lastText)});
-        lastText=next;
+      const merged = mergeChatStreamMessage(lastMessage, p);
+      if (merged !== undefined) {
+        lastMessage = merged;
+        const blocks = Array.isArray(merged?.content) ? merged.content : [];
+        const next = blocks.map(block => block?.type === 'text' ? (block.text || '') : '').join('');
+        // Emit an authoritative snapshot; the Rust host can replace its current text
+        // without duplicating the first frame's already-applied deltaText.
+        if (next !== lastText) {
+          line({kind:'snapshot',text:next});
+          lastText = next;
+        }
+      } else if (typeof p.deltaText === 'string' && p.deltaText) {
+        // An append without baseline cannot be safely displayed.
+        line({kind:'status',text:'Chat baseline unavailable; recovery required'});
       }
       if (p.state==='final'||p.state==='done'||p.state==='error'||p.state==='aborted') {
         settled=true;
+        line({kind:p.state==='error'?'error':p.state==='aborted'?'aborted':'complete',text:lastText, state:p.state});
         settle();
-        line({kind:p.state==='error'?'error':'complete',text:lastText, state:p.state});
       }
     }
     if (event.event==='session.tool' && p.sessionKey===sessionKey) {
