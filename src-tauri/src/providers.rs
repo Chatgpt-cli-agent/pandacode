@@ -581,7 +581,7 @@ pub fn discover() -> Vec<ProviderInfo> {
         ProviderInfo {
             id: id.into(),
             name: name.into(),
-            installed: path.is_some(),
+            installed: if id == "panda" { crate::panda_openclaw::available() } else { path.is_some() },
             version: if id == "panda" {
                 "OpenClaw".into()
             } else if id == "antigravity" {
