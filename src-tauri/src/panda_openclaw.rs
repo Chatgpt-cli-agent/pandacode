@@ -133,3 +133,77 @@ mod tests {
     }
 
 }
+
+pub(crate) async fn gateway_turn(
+    session_id: String,
+    project_dir: PathBuf,
+    prompt: String,
+    sink: crate::providers::Sink,
+    mut input: tokio::sync::mpsc::UnboundedReceiver<crate::providers::RunInput>,
+) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use crate::providers::{AgentEvent, RunInput};
+    let bridge = std::env::var_os("PANDA_GATEWAY_BRIDGE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("gateway-bridge").join("panda-gateway.mjs"));
+    if !bridge.is_file() { return Err(format!("Gateway bridge not found: {}", bridge.display())); }
+    let mut command = Command::new("node");
+    command.arg(&bridge).current_dir(&project_dir)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|e| format!("Cannot start Gateway bridge: {e}"))?;
+    let mut stdin = child.stdin.take().ok_or("Gateway control input missing")?;
+    let stdout = child.stdout.take().ok_or("Gateway event output missing")?;
+    let key = format!("agent:panda:{}", session_id);
+    let request = serde_json::json!({
+        "sessionKey":key,
+        "prompt": prompt,
+        "url":"ws://127.0.0.1:18789"
+    });
+    stdin.write_all(format!("{request}\n").as_bytes()).await.map_err(|e|e.to_string())?;
+    let mut reader = BufReader::new(stdout).lines();
+    let mut complete = false;
+    let mut accepted = false;
+    let mut error = None;
+    loop {
+        tokio::select! {
+            next = reader.next_line() => {
+                let Some(line) = next.map_err(|e|e.to_string())? else { break };
+                if line.len()>256*1024 { return Err("Gateway event too large".into()); }
+                let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
+                let kind=event["kind"].as_str().unwrap_or_default();
+                match kind {
+                    "text" => {
+                        let text=event["text"].as_str().unwrap_or("");
+                        if !text.is_empty() { sink(AgentEvent{session_id:session_id.clone(),kind:"text".into(),text:text.into(),request_id:None,data:None,tool:None}); }
+                    }
+                    "status" => sink(AgentEvent{session_id:session_id.clone(),kind:"status".into(),text:event["text"].as_str().unwrap_or("").into(),request_id:None,data:None,tool:None}),
+                    "accepted" => {
+                        accepted=true;
+                        sink(AgentEvent{session_id:session_id.clone(),kind:"message_start".into(),text:String::new(),request_id:None,data:Some(serde_json::json!({"messageId":event["runId"]})),tool:None});
+                    },
+                    "complete" => {complete=true;break;},
+                    "aborted" => return Err("Panda Gateway turn cancelled".into()),
+                    "error" => {error=Some(event["text"].as_str().unwrap_or("Gateway failed").to_owned());break;},
+                    _ => {}
+                }
+            },
+            incoming = input.recv() => match incoming {
+                Some(RunInput::Stop) | None => {
+                    let _=stdin.write_all(b"{\"kind\":\"abort\"}\n").await;
+                    let _=tokio::time::timeout(Duration::from_secs(5),child.wait()).await;
+                    return Err("Panda Gateway turn cancelled".into());
+                },
+                Some(RunInput::Steer { reply, .. }) => {let _=reply.send(Err("Gateway steering is not wired yet".into()));},
+                Some(RunInput::Goal {reply,..}) => {let _=reply.send(Err("Panda goal tools need Gateway mapping".into()));},
+                Some(RunInput::CodexRequest {reply,..}) => {let _=reply.send(Err("Not a Codex provider".into()));},
+                Some(RunInput::UserInput {reply,..}) => {if let Some(reply)=reply {let _=reply.send(Err("Unsupported user input".into()));}},
+                Some(RunInput::Approval {..}) => {}
+            }
+        }
+    }
+    let status = child.wait().await.map_err(|e|e.to_string())?;
+    if let Some(error)=error {return Err(error);}
+    if !complete || !accepted || !status.success() {return Err("Gateway turn did not complete successfully".into());}
+    Ok(())
+}
