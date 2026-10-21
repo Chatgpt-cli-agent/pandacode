@@ -2619,12 +2619,9 @@ pub async fn run_with_tools(
             Ok(reply) => {
                 sink(AgentEvent { session_id: session_id.clone(), kind: "message_start".into(), text: String::new(), request_id: None, data: Some(json!({"messageId": format!("panda-{}",uuid::Uuid::new_v4())})), tool: None });
                 sink(AgentEvent { session_id: session_id.clone(), kind: "text".into(), text: reply.text, request_id: None, data: None, tool: None });
-                sink(AgentEvent { session_id, kind: "done".into(), text: "Finished".into(), request_id: None, data: None, tool: None });
                 return Ok(());
             }
             Err(error) => {
-                sink(AgentEvent { session_id: session_id.clone(), kind: "error".into(), text: error.clone(), request_id: None, data: None, tool: None });
-                sink(AgentEvent { session_id, kind: "done".into(), text: "Failed".into(), request_id: None, data: None, tool: None });
                 return Err(error);
             }
         }
