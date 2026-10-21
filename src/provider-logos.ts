@@ -2,7 +2,7 @@ import type { ProviderId } from './types';
 import { escape } from './dom';
 
 // Original provider assets; see docs/brand-assets.md for provenance.
-const logos: Record<ProviderId, string> = {
+const logos: Partial<Record<ProviderId, string>> = {
   claude: new URL('./assets/providers/claude.svg', import.meta.url).href,
   codex: new URL('./assets/providers/openai.svg', import.meta.url).href,
   kimi: new URL('./assets/providers/kimi.png', import.meta.url).href,
