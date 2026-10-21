@@ -65,7 +65,8 @@ fn openclaw_command() -> Result<Command, String> {
 
 #[tauri::command]
 pub async fn panda_openclaw_check() -> Result<String,String> {
-    let result=tokio::time::timeout(Duration::from_secs(12), openclaw_command()?.arg("--version").output())
+    let mut cmd = openclaw_command()?;
+    let result=tokio::time::timeout(Duration::from_secs(12), cmd.arg("--version").output())
         .await.map_err(|_|"OpenClaw version check timed out")?.map_err(|e|format!("OpenClaw not available: {e}"))?;
     if !result.status.success(){return Err("OpenClaw CLI version check failed".into())}
     Ok(String::from_utf8_lossy(&result.stdout).trim().to_owned())
