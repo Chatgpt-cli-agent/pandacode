@@ -34,6 +34,12 @@ fn validate_id(value: &str) -> Result<(), String> {
     }
     Ok(())
 }
+fn validate_model(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > 200 || !value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b':' | b'/' )) {
+        return Err("Invalid model identifier".into());
+    }
+    Ok(())
+}
 fn root(path: &str) -> Result<PathBuf, String> {
     let dir = std::fs::canonicalize(path).map_err(|_| "Project directory was not found")?;
     if !dir.is_dir() {return Err("Project path is not a folder".into())}
@@ -95,7 +101,7 @@ pub async fn panda_openclaw_check() -> Result<String,String> {
 pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> {
     let project=root(&req.project_dir)?;
     if req.prompt.trim().is_empty() || req.prompt.len()>MAX_PROMPT {return Err("Message is empty or too large".into())}
-    if let Some(model)=req.model.as_deref(){validate_id(model)?;}
+    if let Some(model)=req.model.as_deref(){validate_model(model)?;}
     if let Some(key)=req.session_key.as_deref(){validate_id(key)?;}
     let mut cmd=openclaw_command();
     cmd.current_dir(project)
@@ -134,5 +140,5 @@ pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn check_id(){assert!(validate_id("agent:panda:project-1").is_ok()); assert!(validate_id("../escape").is_err());}
+    #[test] fn check_id(){assert!(validate_id("agent:panda:project-1").is_ok()); assert!(validate_id("../escape").is_err()); assert!(validate_model("openai/gpt-5").is_ok()); assert!(validate_model("../bad").is_err());}
 }
