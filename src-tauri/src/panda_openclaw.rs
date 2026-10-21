@@ -45,54 +45,27 @@ fn root(path: &str) -> Result<PathBuf, String> {
     if !dir.is_dir() {return Err("Project path is not a folder".into())}
     Ok(dir)
 }
-fn openclaw_command() -> Command {
-    // Windows npm installs a .cmd shim which cannot be spawned as an executable
-    // by Tokio directly. Resolve its installed Node entrypoint rather than
-    // invoking cmd.exe /C with interpolated user input.
-    #[cfg(windows)]
-    let mut cmd = {
-        let supplied = std::env::var_os("PANDA_OPENCLAW_EXECUTABLE");
-        let candidates: Vec<PathBuf> = if let Some(path) = supplied {
-            vec![PathBuf::from(path)]
-        } else {
-            let mut out = vec![];
-            if let Some(appdata) = std::env::var_os("APPDATA") {
-                out.push(PathBuf::from(appdata).join("npm").join("node_modules").join("openclaw").join("openclaw.mjs"));
-            }
-            if let Some(home) = std::env::var_os("USERPROFILE") {
-                out.push(PathBuf::from(home).join(".local").join("bin").join("openclaw.mjs"));
-                out.push(PathBuf::from(home).join("openclaw").join("openclaw.mjs"));
-            }
-            out
-        };
-        let file = candidates.iter().find_map(|path| {
-            if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("cmd")) {
-                let sibling = path.parent()?.join("node_modules").join("openclaw").join("openclaw.mjs");
-                if sibling.is_file() { return Some(sibling); }
-            }
-            if path.is_file() && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("mjs") || ext.eq_ignore_ascii_case("js")) {
-                return Some(path.clone());
-            }
-            None
-        });
-        if let Some(entry) = file {
-            let mut command = Command::new("node");
-            command.arg(entry);
-            command
-        } else {
-            Command::new("openclaw.exe")
-        }
-    };
-    #[cfg(not(windows))]
-    let mut cmd = Command::new(std::env::var_os("PANDA_OPENCLAW_EXECUTABLE").unwrap_or_else(|| "openclaw".into()));
+pub(crate) fn available() -> bool {
+    resolve_executable().is_some()
+}
+fn resolve_executable() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("PANDA_OPENCLAW_EXECUTABLE") {
+        let path = PathBuf::from(path);
+        return path.is_file().then_some(path);
+    }
+    crate::providers::tool_path("openclaw")
+}
+fn openclaw_command() -> Result<Command, String> {
+    let path = resolve_executable().ok_or("OpenClaw executable not found. Install OpenClaw or configure PANDA_OPENCLAW_EXECUTABLE")?;
+    let mut cmd = crate::providers::command(&path)?;
     cmd.arg("--profile").arg(PROFILE);
     cmd.env("OPENCLAW_DISABLE_BONJOUR", "1");
-    cmd
+    Ok(cmd)
 }
 
 #[tauri::command]
 pub async fn panda_openclaw_check() -> Result<String,String> {
-    let result=tokio::time::timeout(Duration::from_secs(12), openclaw_command().arg("--version").output())
+    let result=tokio::time::timeout(Duration::from_secs(12), openclaw_command()?.arg("--version").output())
         .await.map_err(|_|"OpenClaw version check timed out")?.map_err(|e|format!("OpenClaw not available: {e}"))?;
     if !result.status.success(){return Err("OpenClaw CLI version check failed".into())}
     Ok(String::from_utf8_lossy(&result.stdout).trim().to_owned())
@@ -103,7 +76,7 @@ pub async fn panda_openclaw_turn(req:PandaRequest) -> Result<PandaReply,String> 
     if req.prompt.trim().is_empty() || req.prompt.len()>MAX_PROMPT {return Err("Message is empty or too large".into())}
     if let Some(model)=req.model.as_deref(){validate_model(model)?;}
     if let Some(key)=req.session_key.as_deref(){validate_id(key)?;}
-    let mut cmd=openclaw_command();
+    let mut cmd=openclaw_command()?;
     cmd.current_dir(project)
        .arg("agent").arg("--agent").arg("main")
        .arg("--message-file").arg("-")
