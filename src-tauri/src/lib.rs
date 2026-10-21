@@ -19,6 +19,7 @@ mod project_icon;
 mod simulator;
 mod vm;
 mod secret_store;
+mod panda_openclaw;
 mod cloud;
 mod vsix_themes;
 mod token_saver;
@@ -2922,6 +2923,8 @@ pub fn run() {
             }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
                 support::open_support,
+                panda_openclaw::panda_openclaw_check,
+                panda_openclaw::panda_openclaw_turn,
                 support::support_details,
                 agent_updates::check_agent_updates,
                 agent_updates::update_agent,
