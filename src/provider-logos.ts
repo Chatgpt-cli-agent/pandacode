@@ -16,6 +16,7 @@ const logos: Partial<Record<ProviderId, string>> = {
 
 /** Decorative provider mark. The surrounding control supplies its accessible name. */
 export function providerLogo(id: ProviderId, cls = ''): string {
-  if (!Object.hasOwn(logos, id)) return '';
-  return `<img class="provider-logo${cls ? ` ${escape(cls)}` : ''}" data-provider="${id}" src="${escape(logos[id])}" width="20" height="20" alt="" aria-hidden="true" draggable="false">`;
+  const logo = logos[id];
+  if (!logo) return '';
+  return `<img class="provider-logo${cls ? ` ${escape(cls)}` : ''}" data-provider="${id}" src="${escape(logo)}" width="20" height="20" alt="" aria-hidden="true" draggable="false">`;
 }
