@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { GatewayClient } from '@openclaw/gateway-client';
 import { PROTOCOL_VERSION } from '@openclaw/gateway-protocol/version';
+import { GATEWAY_CLIENT_CAPS } from '@openclaw/gateway-protocol/client-info';
 
 const line = (message) => process.stdout.write(JSON.stringify(message) + '\n');
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -33,6 +34,9 @@ const client = new GatewayClient({
   token: process.env.PANDA_GATEWAY_TOKEN,
   minProtocol: PROTOCOL_VERSION,
   maxProtocol: PROTOCOL_VERSION,
+  role: 'operator',
+  scopes: ['operator.read','operator.write'],
+  caps: [GATEWAY_CLIENT_CAPS.TOOL_EVENTS],
   onHelloOk: ()=>{line({kind:'status',text:'Gateway connected'});readyResolve();},
   onConnectError: error => {
     if (!started) readyReject(error);
@@ -42,9 +46,11 @@ const client = new GatewayClient({
     const p=event.payload||{};
     if (event.event==='chat' && p.sessionKey===sessionKey) {
       if (activeRun && p.runId && p.runId!==activeRun) return;
-      const next = typeof p.message?.content === 'string' ? p.message.content :
+      const blocks=Array.isArray(p.message?.content)?p.message.content:[];
+      const next = blocks.map(block=>block?.type==='text'?block.text||'':'').join('') ||
+        (typeof p.message?.content === 'string' ? p.message.content :
         typeof p.message?.text === 'string' ? p.message.text :
-        typeof p.text === 'string' ? p.text : '';
+        typeof p.text === 'string' ? p.text : '');
       if (next) {
         const suffix=next.startsWith(lastText)?next.slice(lastText.length):next;
         if (suffix) line({kind:'text',text:suffix,replace:!next.startsWith(lastText)});
