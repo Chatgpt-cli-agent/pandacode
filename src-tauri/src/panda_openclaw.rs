@@ -44,7 +44,7 @@ fn openclaw_command() -> Command {
     // On Windows, .cmd launchers may require separate treatment; use an installed executable when available.
     let executable=std::env::var_os("PANDA_OPENCLAW_EXECUTABLE").unwrap_or_else(||"openclaw".into());
     let mut cmd=Command::new(executable);
-    cmd.env("OPENCLAW_PROFILE",PROFILE);
+    cmd.arg("--profile").arg(PROFILE);
     cmd.env("OPENCLAW_DISABLE_BONJOUR","1");
     cmd
 }
