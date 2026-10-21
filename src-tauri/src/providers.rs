@@ -573,15 +573,18 @@ pub fn discover() -> Vec<ProviderInfo> {
         ("grok", "Grok Build"),
         ("mimo", "MiMo Token Plan"),
         ("pi", "Pi"),
+        ("panda", "Panda (OpenClaw)"),
     ]
     .into_iter()
     .map(|(id, name)| {
-        let path = executable(id);
+        let path = if id == "panda" { launch::find("openclaw") } else { executable(id) };
         ProviderInfo {
             id: id.into(),
             name: name.into(),
             installed: path.is_some(),
-            version: if id == "antigravity" {
+            version: if id == "panda" {
+                "OpenClaw".into()
+            } else if id == "antigravity" {
                 "ACP".into()
             } else {
                 path.as_deref().and_then(version).unwrap_or_default()
@@ -607,6 +610,7 @@ pub fn discover() -> Vec<ProviderInfo> {
 /// On-demand metadata only: no user prompt or inference. ACP-only servers may
 /// create an empty session to advertise their scoped model options.
 pub async fn list_models(provider: &str) -> Result<Vec<ModelInfo>, String> {
+    if provider == "panda" { return Ok(vec![ModelInfo::default_choice()]); }
     if provider == "opencode" {
         let selected = crate::provider_settings::opencode_model_ids()?;
         if selected.is_empty() {
